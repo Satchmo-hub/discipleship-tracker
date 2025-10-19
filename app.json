@@ -1,0 +1,23 @@
+{
+  "expo": {
+    "ios": {
+      "bundleIdentifier": "com.satchmo1.discipleshiptracker",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.satchmo1.discipleshiptracker"
+    },
+    "plugins": [
+      "expo-router"
+    ],
+    "owner": "satchmo1",
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "efd626ee-28cf-48f0-87ad-3ecc5829066f"
+      }
+    }
+  }
+}

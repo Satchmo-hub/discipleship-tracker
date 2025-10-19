@@ -2,7 +2,7 @@
 import React from "react";
 import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { StatsProvider } from "context/StatsContext";
+import { StatsProvider } from "@context/StatsContext"; // ✅ fixed alias
 
 export default function RootTabsLayout() {
   return (

@@ -1,8 +1,9 @@
+// app/_layout.tsx
 import React from "react";
 import { Stack } from "expo-router";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import { StatsProvider } from "../../context/StatsContext"; // ✅ alias version
+import { StatsProvider } from "@context/StatsContext"; // ✅ unified alias
 
 export default function RootLayout() {
   return (
@@ -16,10 +17,7 @@ export default function RootLayout() {
               contentStyle: { backgroundColor: "#f4ecd8" },
             }}
           >
-            {/* 👇 Main app tabs */}
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-
-            {/* 👇 Optional: add modal or future routes here */}
             <Stack.Screen
               name="modal"
               options={{

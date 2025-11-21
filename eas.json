@@ -1,0 +1,68 @@
+{
+  "cli": {
+    "version": ">= 10.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "ios": {
+        "simulator": true
+      },
+      "env": {
+        "APP_ENV": "development"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "ios": {
+        "simulator": false
+      },
+      "autoIncrement": true,
+      "channel": "preview",
+      "env": {
+        "APP_ENV": "preview"
+      }
+    },
+    "production": {
+      "distribution": "store",
+      "ios": {
+        "simulator": false
+      },
+      "autoIncrement": true,
+      "channel": "production",
+      "env": {
+        "APP_ENV": "production",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://mppvorjbxgqickemoxum.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1wcHZvcmpieGdxaWNrZW1veHVtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTkxMTY0NDYsImV4cCI6MjA3NDY5MjQ0Nn0.z9rpTViFf7TsihEqFmVqHGxylsJ5e30__LSoIl0UVok"
+      }
+    },
+    "development-simulator": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "ios": {
+        "simulator": true
+      },
+      "env": {
+        "APP_ENV": "development"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "appleId": "satchmo@satch.org",
+        "ascAppId": "6754231990",
+        "appleTeamId": "JT9J6XR958"
+      }
+    },
+    "preview": {
+      "ios": {
+        "appleId": "satchmo@satch.org",
+        "ascAppId": "6754231990",
+        "appleTeamId": "JT9J6XR958"
+      }
+    }
+  }
+}

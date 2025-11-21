@@ -1,0 +1,88 @@
+{
+  "expo": {
+    "name": "Discipleship Tracker",
+    "slug": "discipleship-tracker",
+    "scheme": "satchmo1.discipleshiptracker",
+    "version": "1.0.0",
+    "orientation": "portrait",
+
+    "icon": "./assets/splash.png",
+    "userInterfaceStyle": "light",
+
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#f9f6ef"
+    },
+
+    "assetBundlePatterns": ["**/*"],
+
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "satchmo1.discipleshiptracker",
+      "buildNumber": "51",
+
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "UIBackgroundModes": ["remote-notification"],
+        "NSUserNotificationAlertSound": true
+      }
+    },
+
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/splash.png",
+        "backgroundColor": "#f9f6ef"
+      },
+      "package": "satchmo1.discipleshiptracker"
+    },
+
+    "notification": {
+      "icon": "./assets/splash.png",
+      "color": "#ffffff",
+      "iosDisplayInForeground": true,
+      "sound": [
+        "./assets/sounds/angel_ahhh.mp3",
+        "./assets/sounds/steam.wav"
+      ]
+    },
+
+    "web": {
+      "favicon": "./assets/splash.png"
+    },
+
+    "plugins": [
+      [
+        "expo-font",
+        {
+          "fonts": [
+            "./assets/fonts/Ringbearer-Regular.ttf",
+            "./assets/fonts/Lora-Regular.ttf",
+            "./assets/fonts/Lora-Bold.ttf",
+            "./assets/fonts/Lora-MediumItalic.ttf"
+          ]
+        }
+      ],
+      "expo-router"
+    ],
+
+    "updates": {
+      "fallbackToCacheTimeout": 0
+    },
+
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+
+    "extra": {
+      "EXPO_PUBLIC_SUPABASE_URL": "https://lulpvlpcgssfrhlsfkru.supabase.co",
+      "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_NLmHfFRB855hSyaCbXUYow_E6APaF-V",
+
+      "eas": {
+        "projectId": "efd626ee-28cf-48f0-87ad-3ecc5829066f"
+      }
+    },
+
+    "owner": "satchmo1"
+  }
+}

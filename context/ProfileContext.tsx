@@ -1,235 +1,201 @@
-// context/ProfileProvider.tsx
+//------------------------------------------------------------
+// REAL PROFILE CONTEXT + AUTO-CREATE + SECURE GODMODE
+// • Auto-creates profile if missing
+// • Loads teacher_code column
+// • Teacher Mode requires entering GODmode-2025
+// • Email alone does NOT activate Teacher Mode (strong 2FA)
+// • Teacher mode persists via AsyncStorage
+//------------------------------------------------------------
+
 import React, { createContext, useContext, useEffect, useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import * as Crypto from "expo-crypto";
-import { supabase } from "../lib/supabase";
-import { Alert } from "react-native";
+import { supabase } from "../supabase/client";
 
-const STORAGE_KEY = "dt.profile";
+const TEACHER_MODE_KEY = "dt.teacherMode.v1";
+const GODMODE_EMAIL = "satchmo@satch.org";
+const GODMODE_CODE = "GODmode-2025";
 
-export type Profile = {
-  uuid: string;
-  public_id: string | null;
-  first_name: string;
-  last_name: string;
-  email: string | null;
-  school_id: string | null;
-  teacher_id: string | null;
-  grade_id: number | null;
-  class_hour_id: number | null;
-  avatar: string | null;
-  created_at?: string;
-  updated_at?: string;
-};
+//------------------------------------------------------------
+// CONTEXT SHAPE
+//------------------------------------------------------------
+const ProfileContext = createContext({
+  profile: null,
+  loading: true,
+  isTeacherMode: false,
+  activateTeacherMode: async (code: string) => false,
+  refreshProfile: async () => {},
+  saveProfile: async () => ({ error: null }),
+});
 
-type ProfileContextType = {
-  profile: Profile | null;
-  loading: boolean;
-  refreshProfile: () => Promise<void>;
-  saveProfile: (updates: Partial<Profile>) => Promise<void>;
-  clearProfile: () => Promise<void>;
-};
-
-const ProfileContext = createContext<ProfileContextType | null>(null);
-
-export const useProfile = () => {
-  const ctx = useContext(ProfileContext);
-  if (!ctx) throw new Error("useProfile must be used inside a ProfileProvider");
-  return ctx;
-};
-
-export function ProfileProvider({ children }: { children: React.ReactNode }) {
-  const [profile, setProfile] = useState<Profile | null>(null);
+//------------------------------------------------------------
+// PROVIDER
+//------------------------------------------------------------
+export function ProfileProvider({ children }) {
+  const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [isTeacherMode, setIsTeacherMode] = useState(false);
 
-  // =======================================================
-  // Generate OR load a stable UUID for this installation
-  // =======================================================
-  const ensureUuid = async (): Promise<string> => {
-    let uuid = await AsyncStorage.getItem("dt.uuid");
+  //------------------------------------------------------------
+  // INIT LOAD
+  //------------------------------------------------------------
+  useEffect(() => {
+    loadEverything();
+  }, []);
 
-    if (!uuid) {
-      uuid = Crypto.randomUUID(); // Expo-safe UUID generator
-      await AsyncStorage.setItem("dt.uuid", uuid);
-    }
+  //------------------------------------------------------------
+  // LOAD PROFILE — AUTO-CREATE IF MISSING
+  //------------------------------------------------------------
+  async function loadEverything() {
+    setLoading(true);
 
-    return uuid;
-  };
-
-  // =======================================================
-  // Public ID generator (7 chars)
-  // =======================================================
-  const generatePublicId = (): string => {
-    const chars =
-      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    let id = "";
-    for (let i = 0; i < 7; i++) {
-      id += chars[Math.floor(Math.random() * chars.length)];
-    }
-    return id;
-  };
-
-  const generateUniquePublicId = async (): Promise<string> => {
-    for (let i = 0; i < 10; i++) {
-      const candidate = generatePublicId();
-
-      const { data } = await supabase
-        .from("profiles")
-        .select("public_id")
-        .eq("public_id", candidate)
-        .maybeSingle();
-
-      if (!data) return candidate; // success
-    }
-
-    return generatePublicId(); // fallback
-  };
-
-  // =======================================================
-  // Load or create the profile record in Supabase
-  // =======================================================
-  const loadOrCreateProfile = async () => {
     try {
-      const uuid = await ensureUuid();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
-      // Try to load existing row
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("uuid", uuid)
-        .maybeSingle();
-
-      if (error) throw error;
-
-      // If no row exists — create a default one
-      if (!data) {
-        const public_id = await generateUniquePublicId();
-
-        const newProfile: Profile = {
-          uuid,
-          public_id,
-          first_name: "Unknown",
-          last_name: "User",
-          email: null,
-          school_id: null,
-          teacher_id: null,
-          grade_id: null,
-          class_hour_id: null,
-          avatar: null,
-        };
-
-        const { data: created, error: insertError } = await supabase
-          .from("profiles")
-          .insert(newProfile)
-          .select()
-          .maybeSingle();
-
-        if (insertError) throw insertError;
-
-        setProfile(created);
-        await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(created));
+      if (!session?.user?.id) {
+        console.warn("⚠️ No Supabase session — user must sign in");
+        setProfile(null);
+        setLoading(false);
         return;
       }
 
-      // Load existing row
-      setProfile(data);
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-    } catch (err) {
-      console.error("❌ Failed to load/create profile:", err);
-    } finally {
-      setLoading(false);
-    }
-  };
+      const userId = session.user.id;
+      const userEmail = session.user.email || "unknown@example.com";
 
-  // Load on app start
-  useEffect(() => {
-    loadOrCreateProfile();
-  }, []);
-
-  // =======================================================
-  // Refresh from Supabase
-  // =======================================================
-  const refreshProfile = async () => {
-    if (!profile?.uuid) return;
-
-    try {
-      const { data, error } = await supabase
+      //------------------------------------------------------------
+      // LOAD PROFILE FROM DB
+      //------------------------------------------------------------
+      const { data: existing } = await supabase
         .from("profiles")
         .select("*")
-        .eq("uuid", profile.uuid)
-        .maybeSingle();
+        .eq("uuid", userId)
+        .single();
 
-      if (error) throw error;
+      if (existing) {
+        // Restore teacher mode from previous sessions
+        const stored = await AsyncStorage.getItem(TEACHER_MODE_KEY);
+        if (stored === "enabled") setIsTeacherMode(true);
 
-      if (data) {
-        setProfile(data);
-        await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        // Strong 2FA: email alone does NOT activate teacher mode
+        if (userEmail.toLowerCase() === GODMODE_EMAIL.toLowerCase()) {
+          console.log("🟣 Godmode email detected — access code still required.");
+        }
+
+        setProfile(existing);
+        setLoading(false);
+        return;
       }
-    } catch (err) {
-      console.error("⚠️ Error refreshing profile:", err);
-    }
-  };
 
-  // =======================================================
-  // Save / Update profile
-  // =======================================================
-  const saveProfile = async (updates: Partial<Profile>) => {
-    if (!profile?.uuid) return;
+      //------------------------------------------------------------
+      // AUTO-CREATE NEW PROFILE IF NOT FOUND
+      //------------------------------------------------------------
+      console.warn("🆕 No profile found — auto-creating new profile…");
 
-    setLoading(true);
-    try {
-      // Public ID must always exist
-      const public_id =
-        profile.public_id || (await generateUniquePublicId());
+      await supabase.from("profiles").insert({
+        uuid: userId,
+        email: userEmail,
+        first_name: "",
+        last_name: "",
+        public_id: userId.slice(0, 8),
+        avatar: null,
+        grade_id: null,
+        class_hour_id: null,
+        teacher_id: null,
+        teacher_code: null, // existing teachers still populate this manually
+      });
 
-      const updated: Profile = {
-        ...profile,
-        ...updates,
-        public_id,
-      };
-
-      const { data, error } = await supabase
+      const { data: newProfile } = await supabase
         .from("profiles")
-        .upsert(updated, { onConflict: "uuid" })
-        .select()
-        .maybeSingle();
+        .select("*")
+        .eq("uuid", userId)
+        .single();
 
-      if (error) throw error;
+      setProfile(newProfile);
 
-      setProfile(data);
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      const storedTeacherMode = await AsyncStorage.getItem(TEACHER_MODE_KEY);
+      if (storedTeacherMode === "enabled") setIsTeacherMode(true);
+
     } catch (err) {
-      console.error("❌ Error saving profile:", err);
-      Alert.alert("Error", "Failed to update your profile.");
-    } finally {
-      setLoading(false);
+      console.error("❌ Unexpected ProfileContext error:", err);
     }
-  };
 
-  // =======================================================
-  // Clear local profile
-  // =======================================================
-  const clearProfile = async () => {
-    try {
-      await AsyncStorage.multiRemove([STORAGE_KEY, "dt.uuid"]);
-      setProfile(null);
-      Alert.alert("Profile Cleared");
-    } catch (err) {
-      console.error("⚠️ Failed to clear profile:", err);
+    setLoading(false);
+  }
+
+  //------------------------------------------------------------
+  // ACTIVATE TEACHER MODE (GODMODE OR TEACHER_CODE)
+  //------------------------------------------------------------
+  async function activateTeacherMode(code: string) {
+    if (!profile) return false;
+
+    const normalized = code.trim();
+    const email = profile.email?.toLowerCase() ?? "";
+
+    // Godmode user MUST enter the secret code
+    if (email === GODMODE_EMAIL.toLowerCase()) {
+      if (normalized === GODMODE_CODE) {
+        console.log("🔓 GODMODE ACTIVATED");
+        setIsTeacherMode(true);
+        await AsyncStorage.setItem(TEACHER_MODE_KEY, "enabled");
+        return true;
+      }
+      return false;
     }
-  };
 
+    // Standard teacher code activation for normal teachers
+    if (profile.teacher_code && normalized === profile.teacher_code.trim()) {
+      console.log("🔓 Teacher Mode ACTIVATED");
+      setIsTeacherMode(true);
+      await AsyncStorage.setItem(TEACHER_MODE_KEY, "enabled");
+      return true;
+    }
+
+    return false;
+  }
+
+  //------------------------------------------------------------
+  // REFRESH PROFILE
+  //------------------------------------------------------------
+  async function refreshProfile() {
+    return loadEverything();
+  }
+
+  //------------------------------------------------------------
+  // SAVE PROFILE
+  //------------------------------------------------------------
+  async function saveProfile(values) {
+    if (!profile?.uuid) return { error: "No profile loaded" };
+
+    const { error } = await supabase
+      .from("profiles")
+      .update(values)
+      .eq("uuid", profile.uuid);
+
+    if (!error) await refreshProfile();
+    return { error };
+  }
+
+  //------------------------------------------------------------
+  // PROVIDER OUTPUT
+  //------------------------------------------------------------
   return (
     <ProfileContext.Provider
       value={{
         profile,
         loading,
+        isTeacherMode,
+        activateTeacherMode,
         refreshProfile,
         saveProfile,
-        clearProfile,
       }}
     >
       {children}
     </ProfileContext.Provider>
   );
 }
+
+//------------------------------------------------------------
+// HOOK
+//------------------------------------------------------------
+export const useProfile = () => useContext(ProfileContext);

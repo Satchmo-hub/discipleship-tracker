@@ -1,11 +1,28 @@
 // app/(tabs)/_layout.tsx
+//------------------------------------------------------------
 import { Tabs } from "expo-router";
+import Animated, { useAnimatedStyle } from "react-native-reanimated";
+
 import TabIcon from "../../components/TabIcon";
-import { useUnreadBounce } from "../../hooks/useUnreadBounce";
+import { useUnread } from "../../context/UnreadContext";
+import { useBobBounce } from "../../hooks/useBobBounce";
 
 export default function TabsLayout() {
-  // Custom hook controlling bounce behavior
-  const { shouldBounce } = useUnreadBounce();
+  // Pull unread counts
+  const { unreadMessages, unreadBadges } = useUnread();
+
+  // Apply bounce if needed
+  const bounceBadges = useBobBounce(unreadBadges > 0);
+  const bounceReminders = useBobBounce(unreadMessages > 0);
+
+  // Animated styles
+  const badgeAnim = useAnimatedStyle(() => ({
+    transform: [{ translateY: bounceBadges.value }],
+  }));
+
+  const remindersAnim = useAnimatedStyle(() => ({
+    transform: [{ translateY: bounceReminders.value }],
+  }));
 
   return (
     <Tabs
@@ -56,29 +73,32 @@ export default function TabsLayout() {
         }}
       />
 
-      {/* BADGES */}
+      {/* BADGES (bobs when unread badges exist) */}
       <Tabs.Screen
         name="badges"
         options={{
           tabBarIcon: ({ focused }) => (
-            <TabIcon
-              focused={focused}
-              source={require("../../assets/images/badges_tab.png")}
-            />
+            <Animated.View style={badgeAnim}>
+              <TabIcon
+                focused={focused}
+                source={require("../../assets/images/badges_tab.png")}
+              />
+            </Animated.View>
           ),
         }}
       />
 
-      {/* REMINDERS — bounce when unread */}
+      {/* REMINDERS (bobs when there are unread messages) */}
       <Tabs.Screen
         name="reminders"
         options={{
           tabBarIcon: ({ focused }) => (
-            <TabIcon
-              focused={focused}
-              source={require("../../assets/images/rolledScroll.png")}
-              bounce={shouldBounce}
-            />
+            <Animated.View style={remindersAnim}>
+              <TabIcon
+                focused={focused}
+                source={require("../../assets/images/reminders.png")}
+              />
+            </Animated.View>
           ),
         }}
       />

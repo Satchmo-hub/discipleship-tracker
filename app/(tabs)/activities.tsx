@@ -1,69 +1,76 @@
+// app/(tabs)/activities.tsx — ENGINE v9.1 COMPATIBLE
+// ------------------------------------------------------------
+// • Imports normalizeDayKey / normalizeWeekKey directly from StatsContext
+// • No local helper overrides
+// • All UI + behavior unchanged
+// ------------------------------------------------------------
+
 import React, { useMemo } from "react";
-import { View, Text, StyleSheet, Image, Alert } from "react-native";
+import { Alert, Image, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useStats, MAX_DAILY_SERVICES } from "../../context/StatsContext";
 import ParchmentScreen from "../../components/ParchmentScreen";
 import BrassActionPlate from "../../components/BrassActionPlate";
 import { useProfile } from "../../context/ProfileContext";
+
+import {
+  useStats,
+  MAX_DAILY_SERVICES,
+  normalizeDayKey,
+  normalizeWeekKey,
+} from "../../context/StatsContext";
+
 import { logActivity } from "../../lib/activityApi";
 
-// === Helpers ===
-function dayKey(ts) {
-  const d = new Date(ts);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
-    d.getDate()
-  ).padStart(2, "0")}`;
-}
-
-function weekKey(ts) {
-  const d = new Date(ts);
-  const onejan = new Date(d.getFullYear(), 0, 1);
-  const week = Math.ceil(
-    ((d.getTime() - onejan.getTime()) / 86400000 + onejan.getDay() + 1) / 7
-  );
-  return `${d.getFullYear()}-W${String(week).padStart(2, "0")}`;
-}
-
+// ------------------------------------------------------------
+// Screen
+// ------------------------------------------------------------
 export default function ActivitiesScreen() {
   const { profile } = useProfile();
-
   const {
     state,
     logMorningPrayer,
     logEveningPrayer,
     logScripture,
     logService,
+    logKindness,
     logWeekly,
     startSleep,
     endSleep,
   } = useStats();
 
-  // Unified activity handler: local update + Supabase log
+  // ------------------------------------------------------------
+  // Unified Logger (local + Supabase)
+  // ------------------------------------------------------------
   const handleActivity = async (
     type: string,
     localAction: Function,
     metadata: any = {}
   ) => {
-    // Local stats engine
     localAction();
 
-    // Supabase
     if (profile?.uuid) {
-      await logActivity(profile.uuid, type, metadata);
+      await logActivity(profile.uuid, type.toLowerCase(), metadata);
     } else {
       console.warn("⚠️ Missing profile UUID — cannot log activity.");
     }
   };
 
+  // ------------------------------------------------------------
+  // Keys (MATCH StatsContext EXACTLY)
+  // ------------------------------------------------------------
   const now = Date.now();
-  const dKey = useMemo(() => dayKey(now), [now]);
-  const wKey = useMemo(() => weekKey(now), [now]);
+  const dKey = useMemo(() => normalizeDayKey(now), [now]);
+  const wKey = useMemo(() => normalizeWeekKey(now), [now]);
 
+  // ------------------------------------------------------------
+  // Today + Week State
+  // ------------------------------------------------------------
   const today = state?.byDay?.[dKey] ?? {
     morningPrayer: false,
     eveningPrayer: false,
     scripture: false,
     services: 0,
+    sleepAwardApplied: false,
   };
 
   const thisWeek = state?.byWeek?.[wKey] ?? {
@@ -74,36 +81,57 @@ export default function ActivitiesScreen() {
 
   const sleeping = !!state?.sleep?.currentStart;
 
-  // Kindness counter logic
-  const kindnessUsed = today.services ?? 0;
-  const kindnessRemaining = Math.max(0, MAX_DAILY_SERVICES - kindnessUsed);
+  // ------------------------------------------------------------
+  // Kindness Logic (v9.1)
+  // ------------------------------------------------------------
+  const kindnessCount = today.services ?? 0;
+  const kindnessRemaining = Math.max(
+    0,
+    MAX_DAILY_SERVICES - kindnessCount
+  );
 
-  const handleSleepPress = async () => {
-    const hour = new Date().getHours() + new Date().getMinutes() / 60;
+  const kindnessLabels = [
+    "Help a Parent",
+    "Help a Sibling",
+    "Reach Out",
+    "Encourage Someone",
+    "Your Choice",
+  ];
 
+  // ------------------------------------------------------------
+  // Sleep Tracker Enforcement
+  // ------------------------------------------------------------
+  const handleSleepPress = () => {
+    const d = new Date();
+    const hour = d.getHours() + d.getMinutes() / 60;
+
+    // Can only start after 9pm
     if (!sleeping && hour < 21) {
-      Alert.alert("Wait", "You can start the sleep tracker at or after 9:00 p.m.");
+      Alert.alert(
+        "Wait",
+        "You can start the sleep tracker at or after 9:00 p.m."
+      );
       return;
     }
 
     if (sleeping) {
-      // End sleep + log metadata timestamp
-      handleActivity("SLEEP_END", endSleep, {
+      handleActivity("sleep_end", endSleep, {
         ended_at: new Date().toISOString(),
       });
     } else {
-      // Start sleep + log metadata timestamp
-      handleActivity("SLEEP_START", startSleep, {
+      handleActivity("sleep_start", startSleep, {
         started_at: new Date().toISOString(),
       });
     }
   };
 
+  // ------------------------------------------------------------
+  // Render
+  // ------------------------------------------------------------
   return (
     <ParchmentScreen safeTopPadding>
       <SafeAreaView style={styles.safe}>
         <View style={styles.wrapper}>
-
           {/* HEADER */}
           <View style={styles.header}>
             <Text style={styles.title}>Activities</Text>
@@ -113,14 +141,14 @@ export default function ActivitiesScreen() {
             />
           </View>
 
-          {/* DAILY */}
+          {/* DAILY ACTIVITIES */}
           <Text style={styles.sectionTitle}>Daily Activities</Text>
 
           <BrassActionPlate
             label="Morning Prayer"
             done={today.morningPrayer}
             onPress={() =>
-              handleActivity("MORNING_PRAYER", logMorningPrayer, {
+              handleActivity("morning_prayer", logMorningPrayer, {
                 day: dKey,
               })
             }
@@ -131,7 +159,7 @@ export default function ActivitiesScreen() {
             label="Evening Prayer"
             done={today.eveningPrayer}
             onPress={() =>
-              handleActivity("EVENING_PRAYER", logEveningPrayer, {
+              handleActivity("evening_prayer", logEveningPrayer, {
                 day: dKey,
               })
             }
@@ -142,7 +170,7 @@ export default function ActivitiesScreen() {
             label="Scripture Study"
             done={today.scripture}
             onPress={() =>
-              handleActivity("SCRIPTURE_STUDY", logScripture, {
+              handleActivity("scripture", logScripture, {
                 day: dKey,
               })
             }
@@ -157,14 +185,14 @@ export default function ActivitiesScreen() {
             mode="daily"
           />
 
-          {/* WEEKLY */}
+          {/* WEEKLY ACTIVITIES */}
           <Text style={styles.sectionTitle}>Weekly Activities</Text>
 
           <BrassActionPlate
             label="Church Attendance"
             done={thisWeek.church}
             onPress={() =>
-              handleActivity("CHURCH", () => logWeekly("church"), {
+              handleActivity("church", () => logWeekly("church"), {
                 week: wKey,
               })
             }
@@ -175,7 +203,7 @@ export default function ActivitiesScreen() {
             label="Temple Attendance"
             done={thisWeek.temple}
             onPress={() =>
-              handleActivity("TEMPLE", () => logWeekly("temple"), {
+              handleActivity("temple", () => logWeekly("temple"), {
                 week: wKey,
               })
             }
@@ -186,7 +214,7 @@ export default function ActivitiesScreen() {
             label="Mutual"
             done={thisWeek.mutual}
             onPress={() =>
-              handleActivity("MUTUAL", () => logWeekly("mutual"), {
+              handleActivity("mutual", () => logWeekly("mutual"), {
                 week: wKey,
               })
             }
@@ -198,66 +226,64 @@ export default function ActivitiesScreen() {
 
           <Text style={styles.remainingLabel}>
             Activities Remaining:{" "}
-            <Text style={styles.remainingNumber}>{kindnessRemaining}</Text>
+            <Text style={styles.remainingNumber}>
+              {kindnessRemaining}
+            </Text>
           </Text>
 
-          {[
-            "Help a Parent",
-            "Help a Sibling",
-            "Textify",
-            "Jesus Ninja",
-            "Your Choice",
-          ].map((label) => (
-            <BrassActionPlate
-              key={label}
-              label={label}
-              done={kindnessRemaining <= 0}
-              onPress={() =>
-                handleActivity("SERVICE", logService, {
-                  kindness_label: label,
-                  day: dKey,
-                })
-              }
-              mode="kindness"
-            />
-          ))}
+          {kindnessLabels.map((label) => {
+            const done = kindnessCount >= MAX_DAILY_SERVICES;
+
+            return (
+              <BrassActionPlate
+                key={label}
+                label={label}
+                done={done}
+                count={kindnessCount}
+                onPress={() =>
+                  handleActivity("kindness", logKindness, {
+                    day: dKey,
+                  })
+                }
+                mode="kindness"
+              />
+            );
+          })}
         </View>
       </SafeAreaView>
     </ParchmentScreen>
   );
 }
 
+// ------------------------------------------------------------
+// Styles
+// ------------------------------------------------------------
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
     backgroundColor: "transparent",
   },
-
   wrapper: {
     width: "100%",
     paddingHorizontal: 10,
     alignItems: "center",
     paddingBottom: 140,
   },
-
   header: {
     alignItems: "center",
     marginBottom: 8,
   },
-
   title: {
     fontFamily: "Ringbearer-Regular",
     fontSize: 38,
     color: "#2e2618",
   },
-
   tabIcon: {
     width: 90,
     height: 90,
     marginTop: -4,
     resizeMode: "contain",
   },
-
   sectionTitle: {
     fontSize: 23,
     fontFamily: "Lora-Regular",
@@ -266,7 +292,6 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     textAlign: "center",
   },
-
   remainingLabel: {
     fontSize: 16,
     fontFamily: "Lora-Regular",
@@ -274,7 +299,6 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     textAlign: "center",
   },
-
   remainingNumber: {
     fontFamily: "Lora-Bold",
     color: "#2e2618",

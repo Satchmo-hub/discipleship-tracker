@@ -1,33 +1,44 @@
 // ============================================================
-// context/StatsContext.tsx — v7.4 (Local Engine + Toast Events)
-// Local-only stats engine (health/skill/coins/sleep/streaks)
-// Emits toasts on: level up, badge earned, skill increase
+// context/StatsContext.tsx — Engine v9.1 (Synced + Corrected)
+// ------------------------------------------------------------
+// • Exports normalizeDayKey / normalizeWeekKey for ActivitiesScreen
+// • Kindness increments services
+// • All v8/9 engine logic preserved
+// • Daily + Weekly keys now consistent across entire app
 // ============================================================
 
 import React, {
   createContext,
   useContext,
   useEffect,
-  useMemo,
   useReducer,
+  useMemo,
+  useRef,
 } from "react";
+
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useToast } from "./ToastContext";
 
 // ============================================================
 // ENGINE VERSION
 // ============================================================
-export const ENGINE_VERSION = 7;
+export const ENGINE_VERSION = 9;
 
-/***** CONFIG *****/
-const ACTIVE_START_HOUR = 6.5;
-const ACTIVE_END_HOUR = 21;
+// ============================================================
+// CONFIG CONSTANTS
+// ============================================================
+const ACTIVE_START_HOUR = 6.5; // 6:30am
+const ACTIVE_END_HOUR = 21;    // 9:00pm
+
 const HEALTH_DECAY_PER_ACTIVE_HOUR = 50 / 29;
 
 const PTS_MORNING_PRAYER = 6;
 const PTS_EVENING_PRAYER = 6;
 const PTS_SCRIPTURE = 8;
+
 const PTS_SERVICE = 3;
+const PTS_KINDNESS = 3;
+
 const PTS_BADGE = 5;
 
 const PTS_SLEEP_BONUS = 8;
@@ -68,20 +79,25 @@ export type WeeklyFlags = {
 export type SleepState = {
   currentStart?: number;
   lastSessionMs?: number;
-  lastSessionDayKey?: DayKey;
+  lastSessionDayKey?: string;
 };
 
 export type StatsState = {
   version: number;
   createdAt: number;
   lastCalcAt: number;
+
   health: number;
   skillLevel: number;
   coins: number;
+
   badges: string[];
+
   byDay: Record<DayKey, DailyFlags>;
   byWeek: Record<WeekKey, WeeklyFlags>;
+
   sleep: SleepState;
+
   streaks: {
     morningPrayer: number;
     eveningPrayer: number;
@@ -90,30 +106,31 @@ export type StatsState = {
 };
 
 // ============================================================
-// HELPERS
+// HELPERS (EXPORTED FOR ACTIVITIES SCREEN)
 // ============================================================
 const clamp = (v: number, lo: number, hi: number) =>
   Math.max(lo, Math.min(hi, v));
 
-function dayKeyFromTs(ts: number): DayKey {
+// 🔥 FIXED — EXPORT these so ActivitiesScreen uses identical keys
+export function normalizeDayKey(ts: number): DayKey {
   const d = new Date(ts);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(
     2,
     "0"
-  )}-${String(d.getDate()).padStart(2, "0")}`;
+  )}-${String(d.getUTCDate()).padStart(2, "0")}`;
 }
 
-function weekKeyFromTs(ts: number): WeekKey {
+export function normalizeWeekKey(ts: number): WeekKey {
   const d = new Date(ts);
-  const y = d.getFullYear();
-  const onejan = new Date(y, 0, 1);
-  const week = Math.ceil(
-    ((d.getTime() - onejan.getTime()) / 86400000 + onejan.getDay() + 1) / 7
-  );
-  return `${y}-W${String(week).padStart(2, "0")}`;
+  const year = d.getUTCFullYear();
+  const start = new Date(Date.UTC(year, 0, 1));
+  const diff = (d.getTime() - start.getTime()) / 86400000;
+  const week = Math.ceil((diff + start.getUTCDay() + 1) / 7);
+  return `${year}-W${String(week).padStart(2, "0")}`;
 }
 
-const defaultDailyFlags = (): DailyFlags => ({
+// Daily/weekly struct creators
+const newDaily = (): DailyFlags => ({
   morningPrayer: false,
   eveningPrayer: false,
   scripture: false,
@@ -121,50 +138,46 @@ const defaultDailyFlags = (): DailyFlags => ({
   sleepAwardApplied: false,
 });
 
-const defaultWeeklyFlags = (): WeeklyFlags => ({
+const newWeekly = (): WeeklyFlags => ({
   church: false,
   mutual: false,
   temple: false,
 });
 
-const defaultStreaks = () => ({
-  morningPrayer: 0,
-  eveningPrayer: 0,
-  scripture: 0,
-});
-
+// Deep clones
+const cloneDaily = (d: DailyFlags): DailyFlags => ({ ...d });
+const cloneWeekly = (w: WeeklyFlags): WeeklyFlags => ({ ...w });
 // ============================================================
-// LEVEL LOGIC
+// LEVEL-UP + POINT APPLICATION
 // ============================================================
-function settleLevelUps(state: StatsState): StatsState {
-  if (state.health < LEVEL_TRIGGER_PERCENT) return state;
+function settleLevelUps(s: StatsState): StatsState {
+  if (s.health < LEVEL_TRIGGER_PERCENT) return s;
 
-  const over = state.health - LEVEL_TRIGGER_PERCENT;
+  const over = s.health - LEVEL_TRIGGER_PERCENT;
   const gained = 1 + Math.floor(over / 100);
   const remainder = over % 100;
 
   return {
-    ...state,
-    skillLevel: state.skillLevel + gained,
-    coins: state.coins + gained * COINS_PER_LEVEL,
+    ...s,
+    skillLevel: Math.max(0, s.skillLevel + gained),
+    coins: s.coins + gained * COINS_PER_LEVEL,
     health: clamp(remainder, 0, 97),
   };
 }
 
-function applyPoints(state: StatsState, delta: number): StatsState {
+function applyPoints(s: StatsState, delta: number): StatsState {
   const next = {
-    ...state,
-    health: clamp(state.health + delta, 0, 200),
+    ...s,
+    health: clamp(s.health + delta, 0, 200),
   };
   return settleLevelUps(next);
 }
 
 // ============================================================
-// DECAY + SLEEP LOGIC
+// TIME DECAY + SLEEP AUTO END LOGIC
 // ============================================================
 function getActiveOverlapMs(startMs: number, endMs: number) {
   if (endMs <= startMs) return 0;
-
   let total = 0;
   let cursor = startMs;
 
@@ -193,28 +206,26 @@ function getActiveOverlapMs(startMs: number, endMs: number) {
 function nextSixThirty(ts: number) {
   const d = new Date(ts);
   const same = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 6, 30).getTime();
-
   const hour = d.getHours() + d.getMinutes() / 60;
-  if (hour >= ACTIVE_START_HOUR || ts > same)
-    return new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, 6, 30).getTime();
 
-  return same;
+  return hour >= ACTIVE_START_HOUR || ts > same
+    ? new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, 6, 30).getTime()
+    : same;
 }
 
-function autoEndSleepIfNeeded(state: StatsState, now: number): StatsState {
-  if (!state.sleep.currentStart) return state;
+function autoEndSleep(s: StatsState, now: number): StatsState {
+  if (!s.sleep.currentStart) return s;
 
-  const start = state.sleep.currentStart;
+  const start = s.sleep.currentStart;
   const autoEnd = nextSixThirty(start);
-
-  if (now < autoEnd) return state;
+  if (now < autoEnd) return s;
 
   const dur = autoEnd - start;
   const hrs = dur / 3600000;
-  const dk = dayKeyFromTs(autoEnd);
+  const dk = normalizeDayKey(autoEnd);
 
-  let updated: StatsState = {
-    ...state,
+  const updated: StatsState = {
+    ...s,
     sleep: {
       lastSessionMs: dur,
       lastSessionDayKey: dk,
@@ -222,58 +233,57 @@ function autoEndSleepIfNeeded(state: StatsState, now: number): StatsState {
     },
   };
 
-  if (hrs >= SLEEP_THRESHOLD_HOURS) {
-    updated = applyPoints(updated, PTS_SLEEP_BONUS);
-  } else {
-    updated = applyPoints(updated, -PTS_SLEEP_PENALTY);
-  }
-
-  return updated;
+  return hrs >= SLEEP_THRESHOLD_HOURS
+    ? applyPoints(updated, PTS_SLEEP_BONUS)
+    : applyPoints(updated, -PTS_SLEEP_PENALTY);
 }
 
-function applyDecayAndCollapse(state: StatsState, now: number) {
-  const last = state.lastCalcAt ?? state.createdAt ?? now;
-  if (now <= last) return { ...state, lastCalcAt: now };
+function applyDecay(s: StatsState, now: number): StatsState {
+  const last = s.lastCalcAt ?? s.createdAt ?? now;
+  if (now <= last) return { ...s, lastCalcAt: now };
 
   const activeMs = getActiveOverlapMs(last, now);
   const hrs = activeMs / 3600000;
-  if (hrs <= 0) return { ...state, lastCalcAt: now };
 
-  let decayed = {
-    ...state,
+  if (hrs <= 0) return { ...s, lastCalcAt: now };
+
+  let next = {
+    ...s,
     lastCalcAt: now,
-    health: clamp(state.health - hrs * HEALTH_DECAY_PER_ACTIVE_HOUR, 0, 200),
+    health: clamp(s.health - hrs * HEALTH_DECAY_PER_ACTIVE_HOUR, 0, 200),
   };
 
-  if (decayed.health <= 0) {
-    decayed = {
-      ...decayed,
+  if (next.health <= 0) {
+    next = {
+      ...next,
       health: 50,
-      skillLevel: Math.max(decayed.skillLevel - 1, 1),
+      skillLevel: Math.max(0, next.skillLevel - 1),
     };
   }
 
-  return decayed;
+  return next;
 }
 
-function stepTime(state: StatsState, now: number) {
-  if (now <= state.lastCalcAt) return state;
-  let s = autoEndSleepIfNeeded(state, now);
-  return applyDecayAndCollapse(s, now);
+function advanceTime(s: StatsState, now: number) {
+  if (now <= s.lastCalcAt) return s;
+  let x = autoEndSleep(s, now);
+  x = applyDecay(x, now);
+  return x;
 }
 
 // ============================================================
 // STORAGE KEY
 // ============================================================
-const STORAGE_KEY = "dt.stats.v7";
+const STORAGE_KEY = "dt.stats.v9";
 
 // ============================================================
-// REDUCER
+// ACTIONS
 // ============================================================
 type Action =
   | { type: "LOG_MORNING_PRAYER"; now: number }
   | { type: "LOG_EVENING_PRAYER"; now: number }
   | { type: "LOG_SCRIPTURE"; now: number }
+  | { type: "LOG_KINDNESS"; now: number }            // ← fixed
   | { type: "LOG_SERVICE"; now: number }
   | { type: "LOG_WEEKLY"; now: number; kind: keyof WeeklyFlags }
   | { type: "GRANT_BADGE"; badge: string; now: number }
@@ -282,27 +292,31 @@ type Action =
   | { type: "END_SLEEP"; now: number }
   | { type: "RESET_ALL"; now: number; payload?: StatsState };
 
+// ============================================================
+// REDUCER  (FULLY FIXED VERSION)
+// ============================================================
 function reducer(state: StatsState, action: Action): StatsState {
-  if (action.type === "RESET_ALL" && action.payload) return action.payload;
+  if (action.type === "RESET_ALL" && action.payload) {
+    return action.payload;
+  }
 
   const now = action.now;
-  let s = stepTime(state, now);
+  let s = advanceTime(state, now);
 
-  const dk = dayKeyFromTs(now);
-  const wk = weekKeyFromTs(now);
+  const dk = normalizeDayKey(now);
+  const wk = normalizeWeekKey(now);
+
+  // Clone daily + weekly entries BEFORE modifying
+  const day = s.byDay[dk] ? cloneDaily(s.byDay[dk]) : newDaily();
+  const week = s.byWeek[wk] ? cloneWeekly(s.byWeek[wk]) : newWeekly();
 
   s = {
     ...s,
-    byDay: { ...s.byDay },
-    byWeek: { ...s.byWeek },
+    byDay: { ...s.byDay, [dk]: day },
+    byWeek: { ...s.byWeek, [wk]: week },
     streaks: { ...s.streaks },
     sleep: { ...(s.sleep || {}) },
   };
-
-  const day = s.byDay[dk] || defaultDailyFlags();
-  const week = s.byWeek[wk] || defaultWeeklyFlags();
-  s.byDay[dk] = { ...day };
-  s.byWeek[wk] = { ...week };
 
   switch (action.type) {
     case "LOG_MORNING_PRAYER":
@@ -336,15 +350,25 @@ function reducer(state: StatsState, action: Action): StatsState {
       }
       break;
 
+    // 🔥 FIXED — kindness now increments daily services
+    case "LOG_KINDNESS":
+      if (day.services < MAX_DAILY_SERVICES) {
+        s.byDay[dk].services = day.services + 1;
+        s = applyPoints(s, PTS_KINDNESS);
+      }
+      break;
+
     case "LOG_WEEKLY":
       if (!week[action.kind]) {
         s.byWeek[wk][action.kind] = true;
+
         const pts =
           action.kind === "church"
             ? PTS_CHURCH
             : action.kind === "mutual"
             ? PTS_MUTUAL
             : PTS_TEMPLE;
+
         s = applyPoints(s, pts);
       }
       break;
@@ -357,9 +381,7 @@ function reducer(state: StatsState, action: Action): StatsState {
       break;
 
     case "SPEND_COINS":
-      if (s.coins >= action.amount) {
-        s.coins -= action.amount;
-      }
+      if (s.coins >= action.amount) s.coins -= action.amount;
       break;
 
     case "START_SLEEP":
@@ -373,21 +395,21 @@ function reducer(state: StatsState, action: Action): StatsState {
         const start = s.sleep.currentStart;
         const dur = now - start;
         const hrs = dur / 3600000;
+        const endKey = normalizeDayKey(now);
 
         s.sleep.lastSessionMs = dur;
-        s.sleep.lastSessionDayKey = dk;
+        s.sleep.lastSessionDayKey = endKey;
         s.sleep.currentStart = undefined;
 
-        if (hrs >= SLEEP_THRESHOLD_HOURS) {
-          s = applyPoints(s, PTS_SLEEP_BONUS);
-        } else {
-          s = applyPoints(s, -PTS_SLEEP_PENALTY);
-        }
+        s =
+          hrs >= SLEEP_THRESHOLD_HOURS
+            ? applyPoints(s, PTS_SLEEP_BONUS)
+            : applyPoints(s, -PTS_SLEEP_PENALTY);
       }
       break;
 
     case "RESET_ALL":
-      s = {
+      return {
         version: ENGINE_VERSION,
         createdAt: now,
         lastCalcAt: now,
@@ -395,57 +417,101 @@ function reducer(state: StatsState, action: Action): StatsState {
         skillLevel: 0,
         coins: COINS_START,
         badges: [],
-        byDay: { [dk]: defaultDailyFlags() },
-        byWeek: { [wk]: defaultWeeklyFlags() },
+        byDay: { [dk]: newDaily() },
+        byWeek: { [wk]: newWeekly() },
         sleep: {},
-        streaks: defaultStreaks(),
+        streaks: {
+          morningPrayer: 0,
+          eveningPrayer: 0,
+          scripture: 0,
+        },
       };
-      break;
   }
 
   return s;
 }
-
 // ============================================================
-// INITIALIZATION
+// INITIAL STATE BUILDER
 // ============================================================
 const buildInitialState = (): StatsState => {
   const now = Date.now();
-  const dk = dayKeyFromTs(now);
-  const wk = weekKeyFromTs(now);
+  const dk = normalizeDayKey(now);
+  const wk = normalizeWeekKey(now);
 
   return {
     version: ENGINE_VERSION,
     createdAt: now,
     lastCalcAt: now,
+
     health: 50,
     skillLevel: 0,
     coins: COINS_START,
+
     badges: [],
-    byDay: { [dk]: defaultDailyFlags() },
-    byWeek: { [wk]: defaultWeeklyFlags() },
+
+    byDay: { [dk]: newDaily() },
+    byWeek: { [wk]: newWeekly() },
+
     sleep: {},
-    streaks: defaultStreaks(),
+
+    streaks: {
+      morningPrayer: 0,
+      eveningPrayer: 0,
+      scripture: 0,
+    },
   };
 };
 
 // ============================================================
-// CONTEXT + PROVIDER
+// CONTEXT API TYPE
 // ============================================================
-const StatsContext = createContext<any>(null);
+type StatsContextValue = {
+  state: StatsState;
 
+  logMorningPrayer: () => void;
+  logEveningPrayer: () => void;
+  logScripture: () => void;
+
+  logService: () => void;
+  logKindness: () => void;
+
+  logWeekly: (kind: keyof WeeklyFlags) => void;
+
+  grantBadge: (badge: string) => void;
+  spendCoins: (amount: number) => void;
+
+  resetAll: () => void;
+  startSleep: () => void;
+  endSleep: () => void;
+
+  applyActivityReward: (activity: string, metadata?: any) => void;
+};
+
+// ============================================================
+// CONTEXT
+// ============================================================
+const StatsContext = createContext<StatsContextValue | null>(null);
+
+// ============================================================
+// PROVIDER
+// ============================================================
 export const StatsProvider = ({ children }: { children: React.ReactNode }) => {
   const { showToast } = useToast();
+
   const [state, dispatch] = useReducer(reducer, undefined, buildInitialState);
 
-  // Load stored stats
+  // ------------------------------------------------------------
+  // LOAD FROM STORAGE
+  // ------------------------------------------------------------
   useEffect(() => {
     (async () => {
       try {
         const raw = await AsyncStorage.getItem(STORAGE_KEY);
         if (!raw) return;
 
-        const parsed = JSON.parse(raw);
+        const parsed: StatsState = JSON.parse(raw);
+
+        // Must match engine version to load
         if (parsed.version === ENGINE_VERSION) {
           dispatch({
             type: "RESET_ALL",
@@ -459,7 +525,9 @@ export const StatsProvider = ({ children }: { children: React.ReactNode }) => {
     })();
   }, []);
 
-  // Save stats to storage
+  // ------------------------------------------------------------
+  // SAVE TO STORAGE
+  // ------------------------------------------------------------
   useEffect(() => {
     if (!state) return;
     AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(state)).catch((err) =>
@@ -467,57 +535,140 @@ export const StatsProvider = ({ children }: { children: React.ReactNode }) => {
     );
   }, [state]);
 
-  // ============================================================
-  // EVENT TOASTS
-  // ============================================================
-  const prevRef = React.useRef<StatsState | null>(null);
+  // ------------------------------------------------------------
+  // TOASTS — new badges + level ups
+  // ------------------------------------------------------------
+  const prevRef = useRef<StatsState | null>(null);
 
   useEffect(() => {
     const prev = prevRef.current;
+
     if (prev) {
-      // Badge earned
       if (state.badges.length > prev.badges.length) {
         showToast("A rare badge has been bestowed!");
       }
-
-      // Skill level increased
       if (state.skillLevel > prev.skillLevel) {
         showToast("Your mastery deepens!");
       }
     }
-    prevRef.current = state;
-  }, [state]);
 
-  const api = useMemo(
+    prevRef.current = state;
+  }, [state, showToast]);
+
+  // ------------------------------------------------------------
+  // CONTEXT API METHODS
+  // ------------------------------------------------------------
+  const api: StatsContextValue = useMemo(
     () => ({
       state,
+
       logMorningPrayer: () =>
         dispatch({ type: "LOG_MORNING_PRAYER", now: Date.now() }),
+
       logEveningPrayer: () =>
         dispatch({ type: "LOG_EVENING_PRAYER", now: Date.now() }),
+
       logScripture: () =>
         dispatch({ type: "LOG_SCRIPTURE", now: Date.now() }),
+
       logService: () =>
         dispatch({ type: "LOG_SERVICE", now: Date.now() }),
+
+      logKindness: () =>
+        dispatch({ type: "LOG_KINDNESS", now: Date.now() }),
+
       logWeekly: (kind: keyof WeeklyFlags) =>
         dispatch({ type: "LOG_WEEKLY", kind, now: Date.now() }),
+
       grantBadge: (badge: string) =>
         dispatch({ type: "GRANT_BADGE", badge, now: Date.now() }),
+
       spendCoins: (amount: number) =>
         dispatch({ type: "SPEND_COINS", amount, now: Date.now() }),
+
       resetAll: () =>
         dispatch({ type: "RESET_ALL", now: Date.now() }),
+
       startSleep: () =>
         dispatch({ type: "START_SLEEP", now: Date.now() }),
+
       endSleep: () =>
         dispatch({ type: "END_SLEEP", now: Date.now() }),
+
+      // ------------------------------------------------------------
+      // 🔥 Global API used by activityApi → applyActivityReward()
+      // ------------------------------------------------------------
+      applyActivityReward: (activity: string, metadata?: any) => {
+        switch (activity) {
+          case "morning_prayer":
+            dispatch({ type: "LOG_MORNING_PRAYER", now: Date.now() });
+            break;
+
+          case "evening_prayer":
+            dispatch({ type: "LOG_EVENING_PRAYER", now: Date.now() });
+            break;
+
+          case "scripture":
+            dispatch({ type: "LOG_SCRIPTURE", now: Date.now() });
+            break;
+
+          case "service":
+            dispatch({ type: "LOG_SERVICE", now: Date.now() });
+            break;
+
+          case "kindness":
+            dispatch({ type: "LOG_KINDNESS", now: Date.now() });
+            break;
+
+          case "church":
+          case "mutual":
+          case "temple":
+            dispatch({
+              type: "LOG_WEEKLY",
+              kind: activity as keyof WeeklyFlags,
+              now: Date.now(),
+            });
+            break;
+
+          case "sleep_start":
+            dispatch({ type: "START_SLEEP", now: Date.now() });
+            break;
+
+          case "sleep_end":
+            dispatch({ type: "END_SLEEP", now: Date.now() });
+            break;
+
+          default:
+            console.warn("Unknown activity type:", activity);
+        }
+      },
     }),
     [state]
   );
+  // ------------------------------------------------------------
+  // GLOBAL BIND — activityApi calls this (server → client)
+  // ------------------------------------------------------------
+  useEffect(() => {
+    (globalThis as any).applyActivityReward = api.applyActivityReward;
+  }, [api]);
 
+  // ------------------------------------------------------------
+  // PROVIDER OUTPUT
+  // ------------------------------------------------------------
   return (
-    <StatsContext.Provider value={api}>{children}</StatsContext.Provider>
+    <StatsContext.Provider value={api}>
+      {children}
+    </StatsContext.Provider>
   );
 };
 
-export const useStats = () => useContext(StatsContext);
+// ============================================================
+// HOOK — useStats()
+// ============================================================
+export const useStats = () => {
+  const ctx = useContext(StatsContext);
+  if (!ctx) {
+    throw new Error("useStats must be used within a StatsProvider");
+  }
+  return ctx;
+};

@@ -1,24 +1,48 @@
-// app/(tabs)/index.tsx
+// ============================================================
+// HomeScreen with SECRET GODMODE UNLOCK BAR
+// Minimal, hidden admin backdoor under Streak Plates
+// ============================================================
+
 import { MotiView } from "moti";
 import React, { useEffect, useState } from "react";
-import { Image, ScrollView, StyleSheet, Text, View, Pressable } from "react-native";
-import { Easing } from "react-native-reanimated";
-import ParchmentScreen from "../../components/ParchmentScreen";
-import { useAvatar } from "../../context/AvatarContext";
-import { useStats } from "../../context/StatsContext";
-import { useProfile } from "../../context/ProfileContext";
-import BrassNameplate from "../../components/BrassNameplate";
+import {
+  Alert,
+  Image,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
 
-import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
 import Animated, {
+  Easing,
   useAnimatedStyle,
   useSharedValue,
-  withTiming,
   withSpring,
+  withTiming,
 } from "react-native-reanimated";
 
+import BrassNameplate from "../../components/BrassNameplate";
+import ParchmentScreen from "../../components/ParchmentScreen";
 
-// === Level Title Helper ===
+import { useAvatar } from "../../context/AvatarContext";
+import { useProfile } from "../../context/ProfileContext";
+import { useStats } from "../../context/StatsContext";
+
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { supabase } from "../../supabase/client";
+import {
+  Gesture,
+  GestureDetector,
+  GestureHandlerRootView,
+} from "react-native-gesture-handler";
+
+// ============================================================
+// LEVEL TITLE HELPER
+// ============================================================
 function getLevelTitle(level: number, gender?: string): string {
   const titlesMale = [
     "Seedling Saint","Sunbeam","Disciple","Priest","Temple Messenger","Tragdor",
@@ -37,6 +61,9 @@ function getLevelTitle(level: number, gender?: string): string {
   return list[idx];
 }
 
+// ============================================================
+// AVATAR IMAGES
+// ============================================================
 const avatarImages = {
   DT_SteamPunkMale: require("../../assets/avatars/DT_SteamPunkMale.png"),
   DTyoungwarriormale: require("../../assets/avatars/DTyoungwarriormale.png"),
@@ -46,10 +73,20 @@ const avatarImages = {
   DTsheildmaidenfemale: require("../../assets/avatars/DTsheildmaidenfemale.png"),
 };
 
+// ============================================================
+// MAIN COMPONENT
+// ============================================================
 export default function HomeScreen() {
   const { state } = useStats();
   const { avatar } = useAvatar();
-  const { profile } = useProfile();
+  const { profile, refreshProfile } = useProfile();
+
+  const MR_C_UUID = "ad32f222-6f49-4ec9-884a-2ba66afd8336";
+
+  const isTeacher =
+    profile?.uuid === MR_C_UUID ||
+    !!profile?.teacher_id ||
+    profile?.teacher_code === "GODmode-2025";
 
   const [avatarLoaded, setAvatarLoaded] = useState(false);
 
@@ -65,7 +102,6 @@ export default function HomeScreen() {
     if (avatar !== null) setAvatarLoaded(true);
   }, [avatar]);
 
-  // === Stats breakdown ===
   const level = state.skillLevel ?? 1;
   const health = state.health ?? 50;
   const coins = state.coins ?? 0;
@@ -85,23 +121,51 @@ export default function HomeScreen() {
   const selectedAvatar =
     avatarImages[avatar] ?? require("../../assets/images/cleanpilgrim.png");
 
-  // === Avatar gestures ===
+  // ============================================================
+  // SECRET GOD MODE INPUT BAR
+  // ============================================================
+  const [godCode, setGodCode] = useState("");
+  const ACCESS_CODE = "GODmode-2025";
+
+  const shouldShowSecretBar =
+    !isTeacher && profile?.uuid !== MR_C_UUID;
+
+  const unlockGodMode = async () => {
+    if (godCode.trim() !== ACCESS_CODE) {
+      Alert.alert("Incorrect code", "Access denied.");
+      return;
+    }
+
+    const { error } = await supabase
+      .from("profiles")
+      .update({ teacher_code: ACCESS_CODE })
+      .eq("uuid", profile.uuid);
+
+    if (error) {
+      Alert.alert("Error", "Could not activate God Mode.");
+      return;
+    }
+
+    setGodCode("");
+    await refreshProfile();
+    Alert.alert("God Mode Activated", "Teacher tools unlocked.");
+  };
+
+  // ============================================================
+  // AVATAR GESTURES
+  // ============================================================
   const scale = useSharedValue(1);
   const translateX = useSharedValue(0);
   const translateY = useSharedValue(0);
 
   const pinchGesture = Gesture.Pinch()
-    .onUpdate((event) => {
-      scale.value = event.scale;
-    })
-    .onEnd(() => {
-      scale.value = withTiming(1, { duration: 250 });
-    });
+    .onUpdate((e) => { scale.value = e.scale; })
+    .onEnd(() => { scale.value = withTiming(1, { duration: 250 }); });
 
   const panGesture = Gesture.Pan()
-    .onUpdate((event) => {
-      translateX.value = event.translationX;
-      translateY.value = event.translationY;
+    .onUpdate((e) => {
+      translateX.value = e.translationX;
+      translateY.value = e.translationY;
     })
     .onEnd(() => {
       translateX.value = withSpring(0);
@@ -118,32 +182,41 @@ export default function HomeScreen() {
     ],
   }));
 
-  // === Badge tap animations ===
-  const coinScale = useSharedValue(1);
-  const dominusScale = useSharedValue(1);
-
-  const coinAnim = useAnimatedStyle(() => ({
-    transform: [{ scale: coinScale.value }],
-  }));
-
-  const dominusAnim = useAnimatedStyle(() => ({
-    transform: [{ scale: dominusScale.value }],
-  }));
-
-  const grow = (sv) => {
-    sv.value = withSpring(1.17, { damping: 7, stiffness: 150 });
-  };
-  const shrink = (sv) => {
-    sv.value = withSpring(1, { damping: 8, stiffness: 160 });
+  // ============================================================
+  // LOGOUT / ERASE
+  // ============================================================
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    Alert.alert("Logged Out", "Your session has ended.");
   };
 
-  const firstName = profile?.first_name ?? null;
+  const handleEraseAll = async () => {
+    Alert.alert(
+      "Erase All Data",
+      "This will delete all local data.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Erase",
+          style: "destructive",
+          onPress: async () => {
+            await AsyncStorage.clear();
+            await supabase.auth.signOut();
+            Alert.alert("Done", "All local data erased.");
+          },
+        },
+      ]
+    );
+  };
 
+  // ============================================================
+  // RENDER
+  // ============================================================
   return (
     <ParchmentScreen safeTopPadding>
       <ScrollView contentContainerStyle={styles.scroll}>
 
-        {/* === Top icon + title === */}
+        {/* Top icon + title */}
         <View style={styles.topSection}>
           <MotiView
             from={{ scale: 0.96, opacity: 0.92 }}
@@ -165,7 +238,7 @@ export default function HomeScreen() {
           <Text style={styles.title}>Home Screen</Text>
         </View>
 
-        {/* === Avatar === */}
+        {/* Avatar */}
         <View style={styles.avatarFrame}>
           <View style={styles.metalFrame}>
             <GestureHandlerRootView style={styles.avatarGesture}>
@@ -180,10 +253,12 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* === Username === */}
-        {firstName && <Text style={styles.userNameOnly}>{firstName}</Text>}
+        {/* Username */}
+        {profile?.first_name && (
+          <Text style={styles.userNameOnly}>{profile.first_name}</Text>
+        )}
 
-        {/* === Level titles === */}
+        {/* Level Titles */}
         <View style={styles.levelBlock}>
           <Text style={styles.levelText}>
             Level {level}: <Text style={styles.currentTitle}>{title}</Text>
@@ -193,49 +268,69 @@ export default function HomeScreen() {
           </Text>
         </View>
 
-        {/* === Stats === */}
+        {/* Stats */}
         <Text style={styles.sectionHeader}>Stats</Text>
+
         <View style={styles.statsSection}>
           <Bar label="Health" value={healthPct} color="#8A1F1F" />
           <Bar label="Skill / Next Level" value={levelProgress} color="#0A4F2C" />
 
-          {/* === Coins === */}
-          <Pressable
-            onPressIn={() => grow(coinScale)}
-            onPressOut={() => shrink(coinScale)}
-            style={{ alignItems: "center" }}
-          >
-            <Animated.View style={coinAnim}>
-              <Image
-                source={require("../../assets/images/coins.png")}
-                style={styles.coinIcon}
-                resizeMode="contain"
-              />
-            </Animated.View>
+          {/* Coins */}
+          <Pressable style={{ alignItems: "center" }}>
+            <Image
+              source={require("../../assets/images/coins.png")}
+              style={styles.coinIcon}
+              resizeMode="contain"
+            />
             <Text style={styles.coinText}>{coins}</Text>
           </Pressable>
         </View>
 
-        {/* === Dominus Badge === */}
-        <Pressable
-          onPressIn={() => grow(dominusScale)}
-          onPressOut={() => shrink(dominusScale)}
-          style={{ alignItems: "center", marginTop: 12 }}
-        >
-          <Animated.View style={dominusAnim}>
-            <Image
-              source={require("../../assets/images/godloveseffort.png")}
-              style={styles.dominusBadge}
-              resizeMode="contain"
-            />
-          </Animated.View>
-        </Pressable>
+        {/* Dominus Badge */}
+        <Image
+          source={require("../../assets/images/godloveseffort.png")}
+          style={styles.dominusBadge}
+          resizeMode="contain"
+        />
 
-        {/* === Streak Plates === */}
+        {/* Streaks */}
         <View style={styles.streakSection}>
           <BrassNameplate title="Scripture Study" value={`${readingStreak} days`} />
           <BrassNameplate title="Nightly Prayer" value={`${eveningStreak} days`} />
           <BrassNameplate title="Morning Prayer" value={`${morningStreak} days`} />
+        </View>
+
+        {/* ============================================================
+            SECRET GOD MODE UNLOCK BAR
+        ============================================================ */}
+        {shouldShowSecretBar && (
+          <View style={styles.secretBar}>
+            <TextInput
+              placeholder="Enter code..."
+              placeholderTextColor="#cfae64"
+              value={godCode}
+              onChangeText={setGodCode}
+              style={styles.secretInput}
+            />
+            <TouchableOpacity style={styles.secretButton} onPress={unlockGodMode}>
+              <Text style={styles.secretButtonText}>Unlock</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Logout / Erase */}
+        <View style={{ marginTop: 40, marginBottom: 80, alignItems: "center" }}>
+          <TouchableOpacity onPress={handleLogout}>
+            <Text style={{ fontSize: 18, color: "#2e2618", marginBottom: 12 }}>
+              Log Out
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={handleEraseAll}>
+            <Text style={{ fontSize: 18, color: "#8A1F1F" }}>
+              Erase All Data
+            </Text>
+          </TouchableOpacity>
         </View>
 
       </ScrollView>
@@ -243,22 +338,30 @@ export default function HomeScreen() {
   );
 }
 
-// === Progress Bar ===
+// ============================================================
+// PROGRESS BAR
+// ============================================================
 function Bar({ label, value, color }) {
   return (
     <View style={styles.barWrapper}>
       <Text style={styles.barLabel}>{label}</Text>
       <View style={styles.barOutline}>
-        <View style={[styles.barFill, { width: `${value}%`, backgroundColor: color }]} />
+        <View
+          style={[
+            styles.barFill,
+            { width: `${value}%`, backgroundColor: color },
+          ]}
+        />
       </View>
       <Text style={styles.barValue}>{value}%</Text>
     </View>
   );
 }
 
-// === Styles ===
+// ============================================================
+// STYLES
+// ============================================================
 const styles = StyleSheet.create({
-// ⭐ Your entire original styles object stays unchanged
   scroll: {
     paddingBottom: 130,
     alignItems: "center",
@@ -309,18 +412,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
 
-  avatarGesture: {
-    width: "100%",
-    height: "100%",
-    justifyContent: "center",
-    alignItems: "center",
-  },
+  avatarGesture: { width: "100%", height: "100%" },
 
-  avatar: {
-    width: "100%",
-    height: "100%",
-    borderRadius: 10,
-  },
+  avatar: { width: "100%", height: "100%", borderRadius: 10 },
 
   userNameOnly: {
     fontFamily: "Lora-MediumItalic",
@@ -342,6 +436,7 @@ const styles = StyleSheet.create({
   },
 
   currentTitle: { color: "#04783C", fontFamily: "Lora-MediumItalic" },
+
   nextTitle: { color: "#FFD700", fontFamily: "Lora-MediumItalic" },
 
   sectionHeader: {
@@ -382,31 +477,59 @@ const styles = StyleSheet.create({
     color: "#2e2618",
   },
 
-  coinIcon: {
-    width: 120,
-    height: 120,
-    marginBottom: -6,
-  },
+  coinIcon: { width: 120, height: 120, marginBottom: -6 },
 
   coinText: {
     fontFamily: "Lora-Bold",
     fontSize: 34,
     color: "#2e2618",
     textAlign: "center",
-    marginTop: 0,
   },
 
-  dominusBadge: {
-    width: 140,
-    height: 140,
-    marginTop: 4,
-  },
+  dominusBadge: { width: 140, height: 140, marginTop: 4 },
 
   streakSection: {
     width: "100%",
     marginTop: 26,
     paddingHorizontal: 12,
     alignItems: "stretch",
-    justifyContent: "center",
+  },
+
+  // ============================================================
+  // SECRET GOD MODE UNLOCK BAR
+  // ============================================================
+  secretBar: {
+    flexDirection: "row",
+    marginTop: 14,
+    alignItems: "center",
+    width: "80%",
+    borderWidth: 1.5,
+    borderColor: "#cfae64",
+    borderRadius: 10,
+    backgroundColor: "rgba(59,47,31,0.35)",
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+  },
+
+  secretInput: {
+    flex: 1,
+    fontFamily: "Lora-Regular",
+    color: "#f5e7c3",
+    paddingVertical: 6,
+    fontSize: 16,
+  },
+
+  secretButton: {
+    marginLeft: 10,
+    backgroundColor: "#a78a57",
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+  },
+
+  secretButtonText: {
+    color: "white",
+    fontFamily: "Lora-Bold",
+    fontSize: 14,
   },
 });

@@ -1,11 +1,32 @@
-// lib/activityApi.ts
-import { supabase } from "./supabase";
+// lib/activityApi.ts — REWRITTEN FOR ENGINE v9
+//------------------------------------------------------------
+// • New lowercase ActivityType union (matches UI + StatsContext)
+// • Backward‑compatible with old uppercase identifiers
+// • Strict normalization → ONLY v9 strings hit Supabase
+// • Clean payload structure
+// • Batch logging included
+//------------------------------------------------------------
 
-/**
- * Types of activities the app can log.
- * Add more strings here as needed — the backend will accept any of them.
- */
+import { supabase } from "../supabase/client";
+
+//------------------------------------------------------------
+// v9 Activity Types — lowercase, matches ActivitiesScreen + StatsContext
+//------------------------------------------------------------
 export type ActivityType =
+  | "morning_prayer"
+  | "evening_prayer"
+  | "scripture"
+  | "church"
+  | "temple"
+  | "mutual"
+  | "service"
+  | "kindness"
+  | "sleep_start"
+  | "sleep_end"
+  | "sem_class"
+  | "family_home_evening"
+  | "custom"
+  // Backwards compatibility with older uppercase events
   | "MORNING_PRAYER"
   | "EVENING_PRAYER"
   | "SCRIPTURE_STUDY"
@@ -13,25 +34,87 @@ export type ActivityType =
   | "TEMPLE"
   | "MUTUAL"
   | "SERVICE"
+  | "SEMINARY"
+  | "FHE"
+  | "KINDNESS"
   | "SLEEP_START"
   | "SLEEP_END"
   | "CUSTOM";
 
-/**
- * Extra metadata you may want to attach to an activity:
- * - sleep start/end times
- * - duration
- * - step counts
- * - emotion ratings
- * - anything you want in the future
- */
+//------------------------------------------------------------
+// Metadata container: optional params for any activity
+//------------------------------------------------------------
 export type ActivityMeta = {
   [key: string]: any;
 };
 
-/**
- * Safely logs a single activity to Supabase.
- */
+//------------------------------------------------------------
+// Normalization — maps incoming strings → official DB names
+//------------------------------------------------------------
+function normalizeActivityType(type: ActivityType): string {
+  switch (type) {
+    // --- NEW lowercase events
+    case "morning_prayer":
+    case "MORNING_PRAYER":
+      return "morning_prayer";
+
+    case "evening_prayer":
+    case "EVENING_PRAYER":
+      return "evening_prayer";
+
+    case "scripture":
+    case "SCRIPTURE_STUDY":
+      return "scripture";
+
+    case "church":
+    case "CHURCH":
+      return "church";
+
+    case "temple":
+    case "TEMPLE":
+      return "temple";
+
+    case "mutual":
+    case "MUTUAL":
+      return "mutual";
+
+    case "service":
+    case "SERVICE":
+      return "service";
+
+    case "kindness":
+    case "KINDNESS":
+      return "kindness";
+
+    case "sleep_start":
+    case "SLEEP_START":
+      return "sleep_start";
+
+    case "sleep_end":
+    case "SLEEP_END":
+      return "sleep_end";
+
+    case "sem_class":
+    case "SEMINARY":
+      return "sem_class";
+
+    case "family_home_evening":
+    case "FHE":
+      return "family_home_evening";
+
+    case "custom":
+    case "CUSTOM":
+      return "custom";
+
+    // fallback → sanitized lowercase
+    default:
+      return String(type).toLowerCase();
+  }
+}
+
+//------------------------------------------------------------
+// Log single activity
+//------------------------------------------------------------
 export async function logActivity(
   profileId: string,
   activityType: ActivityType,
@@ -42,9 +125,11 @@ export async function logActivity(
     return null;
   }
 
+  const dbType = normalizeActivityType(activityType);
+
   const payload = {
     profile_id: profileId,
-    activity_type: activityType,
+    activity_type: dbType,
     metadata,
   };
 
@@ -59,26 +144,24 @@ export async function logActivity(
     return null;
   }
 
-  console.log("✅ Activity logged:", payload);
+  console.log(`✅ Activity logged: ${dbType}`, payload);
   return data;
 }
 
-/**
- * Batch logging — not used yet, but invaluable if:
- * - you add offline mode
- * - you sync multiple activities at app launch
- */
+//------------------------------------------------------------
+// Batch Insert (sync multiple entries)
+//------------------------------------------------------------
 export async function logActivitiesBatch(
   profileId: string,
   entries: { activityType: ActivityType; metadata?: ActivityMeta }[]
 ) {
   if (!profileId) return null;
-  if (!entries.length) return [];
+  if (entries.length === 0) return [];
 
-  const rows = entries.map((e) => ({
+  const rows = entries.map((entry) => ({
     profile_id: profileId,
-    activity_type: e.activityType,
-    metadata: e.metadata ?? {},
+    activity_type: normalizeActivityType(entry.activityType),
+    metadata: entry.metadata ?? {},
   }));
 
   const { data, error } = await supabase
@@ -91,6 +174,6 @@ export async function logActivitiesBatch(
     return null;
   }
 
-  console.log("✅ Batch activities logged:", rows.length);
+  console.log(`✅ Batch activities logged: ${rows.length}`);
   return data;
 }

@@ -1,35 +1,43 @@
 // app/(tabs)/settings.tsx
-import React, { useEffect, useState, useCallback } from "react";
+//-----------------------------------------------------------
+// SETTINGS SCREEN — with class-hour dedupe fix
+//-----------------------------------------------------------
+
+import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Dimensions,
   Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
-  Dimensions,
 } from "react-native";
 
-import ParchmentScreen from "../../components/ParchmentScreen";
-import DropDownPicker from "react-native-dropdown-picker";
 import * as Clipboard from "expo-clipboard";
 import { LinearGradient } from "expo-linear-gradient";
 import { AnimatePresence, MotiView } from "moti";
+import DropDownPicker from "react-native-dropdown-picker";
 import { SafeAreaView } from "react-native-safe-area-context";
+import ParchmentScreen from "../../components/ParchmentScreen";
+
 import { useAvatar } from "../../context/AvatarContext";
 import { useProfile } from "../../context/ProfileContext";
 import { useToast } from "../../context/ToastContext";
-import { supabase } from "../../lib/supabase";
+import { supabase } from "../../supabase/client";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const PORTRAIT_RATIO = 1.35;
 
-// ---- Avatar Options ----
+/* ============================
+   AVATAR OPTIONS
+============================ */
 const avatarOptions = {
   DT_SteamPunkMale: require("../../assets/avatars/DT_SteamPunkMale.png"),
   DTyoungwarriormale: require("../../assets/avatars/DTyoungwarriormale.png"),
@@ -44,39 +52,47 @@ export default function SettingsScreen() {
   const { profile, saveProfile, refreshProfile, loading } = useProfile();
   const { showToast } = useToast();
 
-  // Local fields
+  /* ============================
+         LOCAL STATE
+  ============================ */
   const [publicId, setPublicId] = useState(profile?.public_id || "");
   const [firstName, setFirstName] = useState(profile?.first_name || "");
   const [lastName, setLastName] = useState(profile?.last_name || "");
   const [email, setEmail] = useState(profile?.email || "");
 
-  const [schoolId, setSchoolId] = useState<string>(profile?.school_id || "");
-  const [teacherId, setTeacherId] = useState<string>(profile?.teacher_id || "");
-  const [gradeId, setGradeId] = useState<string | null>(
-    profile?.grade_id ? String(profile.grade_id) : null
-  );
-  const [classHourId, setClassHourId] = useState<string | null>(
-    profile?.class_hour_id ? String(profile.class_hour_id) : null
-  );
+  const [schoolId, setSchoolId] = useState(profile?.school_id || null);
+  const [teacherId, setTeacherId] = useState(profile?.teacher_id || null);
 
-  // Dropdown data
-  const [schools, setSchools] = useState<any[]>([]);
-  const [teachers, setTeachers] = useState<any[]>([]);
-  const [grades, setGrades] = useState<any[]>([]);
-  const [classHours, setClassHours] = useState<any[]>([]);
+  // 🔧 FIXED: initialize as null, let useEffect populate once profile is loaded
+  const [gradeId, setGradeId] = useState<string | null>(null);
+  const [classHourId, setClassHourId] = useState<string | null>(null);
 
-  // Dropdown open states
+  /* ============================
+         DROPDOWN DATA
+  ============================ */
+  const [schools, setSchools] = useState([]);
+  const [teachers, setTeachers] = useState([]);
+  const [grades, setGrades] = useState([]);
+  const [classHours, setClassHours] = useState([]);
+
+  /* ============================
+        DROPDOWN STATE
+  ============================ */
   const [openSchool, setOpenSchool] = useState(false);
   const [openTeacher, setOpenTeacher] = useState(false);
   const [openGrade, setOpenGrade] = useState(false);
   const [openClassHour, setOpenClassHour] = useState(false);
 
-  // Avatar modal
+  /* ============================
+        AVATAR PREVIEW
+  ============================ */
   const [previewVisible, setPreviewVisible] = useState(false);
   const [previewSrc, setPreviewSrc] = useState<any>(null);
   const [previewKey, setPreviewKey] = useState<string | null>(null);
 
-  // Sync profile
+  /* ============================
+      SYNC AFTER PROFILE LOAD
+  ============================ */
   useEffect(() => {
     if (!profile) return;
 
@@ -85,75 +101,170 @@ export default function SettingsScreen() {
     setLastName(profile.last_name || "");
     setEmail(profile.email || "");
 
-    setSchoolId(profile.school_id || "");
-    setTeacherId(profile.teacher_id || "");
-    setGradeId(profile.grade_id ? String(profile.grade_id) : null);
-    setClassHourId(profile.class_hour_id ? String(profile.class_hour_id) : null);
+    setSchoolId(profile.school_id || null);
+    setTeacherId(profile.teacher_id || null);
+
+    setGradeId(
+      profile.grade_id !== null && profile.grade_id !== undefined
+        ? String(profile.grade_id)
+        : null
+    );
+
+    setClassHourId(
+      profile.class_hour_id !== null && profile.class_hour_id !== undefined
+        ? String(profile.class_hour_id)
+        : null
+    );
   }, [profile]);
 
-  // Load Schools
+  /* ============================
+       LOAD SEMINARIES
+  ============================ */
   useEffect(() => {
     (async () => {
-      const { data } = await supabase.from("schools").select("id, name").order("name");
-      setSchools(data || []);
-    })();
-  }, []);
-
-  // Load Teachers
-  useEffect(() => {
-    if (!schoolId) {
-      setTeachers([]);
-      return;
-    }
-
-    (async () => {
-      const { data } = await supabase
-        .from("teachers")
+      const { data, error } = await supabase
+        .from("seminaries")
         .select("id, name")
-        .eq("school_id", schoolId)
         .order("name");
 
-      setTeachers(data || []);
-    })();
-  }, [schoolId]);
-
-  // Load Grades + Class Periods
-  useEffect(() => {
-    (async () => {
-      try {
-        const [gradesRes, periodsRes] = await Promise.all([
-          supabase.from("grades").select("id, label").order("id"),
-          supabase.from("class_hours").select("id, label").order("id"),
-        ]);
-
-        setGrades(gradesRes.data || []);
-        setClassHours(periodsRes.data || []);
-      } catch {
-        setGrades([]);
-        setClassHours([]);
+      if (!error && data) {
+        setSchools(
+          data.map((s: any) => ({
+            label: s.name,
+            value: String(s.id),
+          }))
+        );
       }
     })();
   }, []);
 
-  // Save Profile
-  const handleSave = useCallback(async () => {
-    try {
-      await saveProfile({
-        public_id: publicId.trim(),
-        first_name: firstName.trim(),
-        last_name: lastName.trim(),
-        email: email.trim(),
-        school_id: schoolId || null,
-        teacher_id: teacherId || null,
-        grade_id: gradeId ? Number(gradeId) : null,
-        class_hour_id: classHourId ? Number(classHourId) : null,
-        avatar,
-      });
+  /* ============================
+       LOAD TEACHERS BY SEMINARY
+  ============================ */
+  useEffect(() => {
+    if (!schoolId) {
+      setTeachers([]);
+      setTeacherId(null);
+      setClassHourId(null);
+      return;
+    }
 
+    (async () => {
+      const { data, error } = await supabase
+        .from("teachers")
+        .select("id, name")
+        .eq("seminary_id", schoolId)
+        .order("name");
+
+      if (!error && data) {
+        setTeachers(
+          data.map((t: any) => ({
+            label: t.name,
+            value: String(t.id),
+          }))
+        );
+      }
+    })();
+  }, [schoolId]);
+
+  /* ============================
+       LOAD GRADES
+  ============================ */
+  useEffect(() => {
+    (async () => {
+      const { data, error } = await supabase
+        .from("grades")
+        .select("id, name")
+        .order("id");
+
+      if (!error && data) {
+        setGrades(
+          data.map((g: any) => ({
+            label: g.name,
+            value: String(g.id),
+          }))
+        );
+      }
+    })();
+  }, []);
+
+  /* ============================
+       LOAD CLASS HOURS (DEDUPE)
+  ============================ */
+  useEffect(() => {
+    if (!teacherId) {
+      setClassHours([]);
+      setClassHourId(null);
+      return;
+    }
+
+    (async () => {
+      const { data, error } = await supabase
+        .from("class_hours")
+        .select("id, class_name, hour, teacher_id")
+        .or(`teacher_id.eq.${teacherId},teacher_id.is.null`)
+        .order("hour");
+
+      if (!error && data) {
+        // 🔥 DEDUPE FIX — remove duplicates
+        const deduped: any[] = [];
+        const seen = new Set<string>();
+
+        for (const row of data as any[]) {
+          const key = `${row.class_name}-${row.hour}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            deduped.push(row);
+          }
+        }
+
+        setClassHours(
+          deduped.map((c: any) => ({
+            label: c.class_name,
+            value: String(c.id),
+          }))
+        );
+      }
+    })();
+  }, [teacherId]);
+
+  /* ============================
+       CLOSE DROPDOWNS
+  ============================ */
+  const closeAllDropdowns = () => {
+    setOpenSchool(false);
+    setOpenTeacher(false);
+    setOpenGrade(false);
+    setOpenClassHour(false);
+  };
+
+  /* ============================
+        SAVE SETTINGS
+  ============================ */
+  const handleSave = useCallback(async () => {
+    closeAllDropdowns();
+
+    const { error } = await saveProfile({
+      public_id: publicId.trim(),
+      first_name: firstName.trim(),
+      last_name: lastName.trim(),
+      email: email.trim(),
+
+      school_id: schoolId || null,
+      teacher_id: teacherId || null,
+
+      grade_id: gradeId ? Number(gradeId) : null,
+      class_hour_id: classHourId ? Number(classHourId) : null,
+
+      avatar,
+    });
+
+    if (error) {
+      console.error("❌ SAVE ERROR:", error);
+      showToast("Failed to save settings.");
+    } else {
       await refreshProfile();
-      showToast("Settings saved!", "success");
-    } catch {
-      showToast("Failed to save settings.", "error");
+      showToast("Settings saved!");
     }
   }, [
     avatar,
@@ -167,31 +278,29 @@ export default function SettingsScreen() {
     classHourId,
     refreshProfile,
     saveProfile,
+    showToast,
   ]);
 
-  // Copy ID
+  /* ============================
+       COPY PUBLIC ID
+  ============================ */
   const handleCopyPublicID = async () => {
     if (!publicId) return;
     await Clipboard.setStringAsync(publicId);
     showToast("Public ID copied!");
   };
 
-  // Confirm avatar
+  /* ============================
+       CONFIRM AVATAR
+  ============================ */
   const confirmAvatar = async () => {
     if (!previewKey) {
-      showToast("Please choose an avatar first.");
+      showToast("Choose an avatar first.");
       return;
     }
     await saveAvatar(previewKey);
     setPreviewVisible(false);
     showToast("Avatar updated!");
-  };
-
-  const closeAllDropdowns = () => {
-    setOpenSchool(false);
-    setOpenTeacher(false);
-    setOpenGrade(false);
-    setOpenClassHour(false);
   };
 
   if (loading) {
@@ -202,6 +311,9 @@ export default function SettingsScreen() {
     );
   }
 
+  /* ============================
+       UI
+  ============================ */
   return (
     <ParchmentScreen safeTopPadding>
       <SafeAreaView style={styles.safe}>
@@ -209,244 +321,258 @@ export default function SettingsScreen() {
           behavior={Platform.OS === "ios" ? "padding" : undefined}
           style={{ flex: 1 }}
         >
-          <View style={styles.container}>
-            <Text style={styles.header}>Settings</Text>
-            <Image
-              source={require("../../assets/images/settings_tab.png")}
-              style={styles.headerIcon}
-            />
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
+            keyboardShouldPersistTaps="handled"
+          >
+            <View style={styles.container}>
+              <Text style={styles.header}>Settings</Text>
 
-            {/* AVATAR GRID */}
-            <Text style={styles.sectionTitle}>Choose Your Avatar</Text>
+              <Image
+                source={require("../../assets/images/settings_tab.png")}
+                style={styles.headerIcon}
+              />
 
-            <View style={styles.grid}>
-              {Object.entries(avatarOptions).map(([key, src]) => (
-                <TouchableOpacity
-                  key={key}
-                  onPress={() => {
-                    setPreviewSrc(src);
-                    setPreviewKey(key);
-                    setPreviewVisible(true);
-                  }}
-                  style={[
-                    styles.avatarWrapper,
-                    avatar === key && styles.selectedAvatar,
-                  ]}
-                >
-                  <Image
-                    source={src}
-                    style={styles.avatarImage}
-                    resizeMode="contain"
-                  />
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            {/* AVATAR MODAL */}
-            <AnimatePresence>
-              {previewVisible && (
-                <Modal transparent visible animationType="fade">
-                  <Pressable
-                    style={styles.modalOverlay}
-                    onPress={() => setPreviewVisible(false)}
+              {/* AVATAR GRID */}
+              <Text style={styles.sectionTitle}>Choose Your Avatar</Text>
+              <View style={styles.grid}>
+                {Object.entries(avatarOptions).map(([key, src]) => (
+                  <TouchableOpacity
+                    key={key}
+                    onPress={() => {
+                      closeAllDropdowns();
+                      setPreviewSrc(src);
+                      setPreviewKey(key);
+                      setPreviewVisible(true);
+                    }}
+                    style={[
+                      styles.avatarWrapper,
+                      avatar === key && styles.selectedAvatar,
+                    ]}
                   >
-                    <MotiView
-                      from={{ opacity: 0, scale: 0.9 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.9 }}
-                      transition={{ duration: 300 }}
-                      style={styles.modalContent}
+                    <Image source={src as any} style={styles.avatarImage} />
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {/* PREVIEW MODAL */}
+              <AnimatePresence>
+                {previewVisible && (
+                  <Modal transparent visible animationType="fade">
+                    <Pressable
+                      style={styles.modalOverlay}
+                      onPress={() => setPreviewVisible(false)}
                     >
-                      <Image
-                        source={previewSrc}
-                        style={styles.previewImage}
-                        resizeMode="contain"
-                      />
-
-                      <TouchableOpacity
-                        onPress={confirmAvatar}
-                        style={styles.confirmButton}
+                      <MotiView
+                        from={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.9 }}
+                        transition={{ duration: 250 }}
+                        style={styles.modalContent}
                       >
-                        <Text style={styles.confirmText}>Use This Avatar</Text>
-                      </TouchableOpacity>
+                        {previewSrc && (
+                          <Image
+                            source={previewSrc}
+                            style={styles.previewImage}
+                          />
+                        )}
 
-                      <Text style={styles.tapToClose}>Tap outside to cancel</Text>
-                    </MotiView>
-                  </Pressable>
-                </Modal>
-              )}
-            </AnimatePresence>
+                        <TouchableOpacity
+                          onPress={confirmAvatar}
+                          style={styles.confirmButton}
+                        >
+                          <Text style={styles.confirmText}>
+                            Use This Avatar
+                          </Text>
+                        </TouchableOpacity>
 
-            {/* USER FIELDS */}
-            <Text style={styles.sectionTitle}>User Information</Text>
+                        <Text style={styles.tapToClose}>
+                          Tap outside to cancel
+                        </Text>
+                      </MotiView>
+                    </Pressable>
+                  </Modal>
+                )}
+              </AnimatePresence>
 
-            {[
-              {
-                label: "First Name",
-                value: firstName,
-                setter: setFirstName,
-                placeholder: "Enter first name",
-              },
-              {
-                label: "Last Name",
-                value: lastName,
-                setter: setLastName,
-                placeholder: "Enter last name",
-              },
-              {
-                label: "Email",
-                value: email,
-                setter: setEmail,
-                placeholder: "Enter email",
-              },
-            ].map((f, idx) => (
-              <LinearGradient
-                key={idx}
-                colors={["#4a3b25", "#3b2f1f", "#4a3b25"]}
-                style={styles.brassPlate}
-              >
-                <Text style={styles.brassLabel}>{f.label}</Text>
-                <TextInput
-                  style={styles.brassTextInput}
-                  value={f.value}
-                  onChangeText={f.setter}
-                  placeholder={f.placeholder}
-                  placeholderTextColor="#cfae64"
-                />
-              </LinearGradient>
-            ))}
+              {/* USER INFO */}
+              <Text style={styles.sectionTitle}>User Information</Text>
+              <View style={{ width: "90%" }}>
+                {[
+                  {
+                    label: "First Name",
+                    value: firstName,
+                    setter: setFirstName,
+                    placeholder: "Enter first name",
+                  },
+                  {
+                    label: "Last Name",
+                    value: lastName,
+                    setter: setLastName,
+                    placeholder: "Enter last name",
+                  },
+                  {
+                    label: "Email",
+                    value: email,
+                    setter: setEmail,
+                    placeholder: "Enter email",
+                  },
+                ].map((f, idx) => (
+                  <LinearGradient
+                    key={idx}
+                    colors={["#4a3b25", "#3b2f1f", "#4a3b25"]}
+                    style={styles.brassPlate}
+                  >
+                    <Text style={styles.brassLabel}>{f.label}</Text>
+                    <TextInput
+                      style={styles.brassTextInput}
+                      value={f.value}
+                      onChangeText={f.setter}
+                      placeholder={f.placeholder}
+                      placeholderTextColor="#cfae64"
+                    />
+                  </LinearGradient>
+                ))}
 
-            {/* PUBLIC ID */}
-            <LinearGradient
-              colors={["#4a3b25", "#3b2f1f", "#4a3b25"]}
-              style={[styles.brassPlate, { marginBottom: 20 }]}
-            >
-              <Text style={styles.brassLabel}>Public ID</Text>
-              <TouchableOpacity onPress={handleCopyPublicID}>
-                <Text style={[styles.brassTextInput, { color: "#d4b16a" }]}>
-                  {publicId || "—"}
-                </Text>
+                <LinearGradient
+                  colors={["#4a3b25", "#3b2f1f", "#4a3b25"]}
+                  style={[styles.brassPlate, { marginBottom: 20 }]}
+                >
+                  <Text style={styles.brassLabel}>Public ID</Text>
+                  <TouchableOpacity onPress={handleCopyPublicID}>
+                    <Text style={[styles.brassTextInput, { color: "#d4b16a" }]}>
+                      {publicId || "—"}
+                    </Text>
+                  </TouchableOpacity>
+                </LinearGradient>
+              </View>
+
+              {/* SCHOOL INFORMATION */}
+              <Text style={styles.schoolHeader}>School Information</Text>
+
+              <DropBlock
+                z={5000}
+                label="Select School"
+                open={openSchool}
+                setOpen={(v) => {
+                  closeAllDropdowns();
+                  setOpenSchool(v);
+                }}
+                value={schoolId}
+                setValue={(setter) => {
+                  const next = setter(schoolId);
+                  setSchoolId(next);
+                }}
+                items={schools}
+              />
+
+              <DropBlock
+                z={4000}
+                label="Select Teacher"
+                open={openTeacher}
+                setOpen={(v) => {
+                  closeAllDropdowns();
+                  setOpenTeacher(v);
+                }}
+                value={teacherId}
+                setValue={(setter) => {
+                  const next = setter(teacherId);
+                  setTeacherId(next);
+                }}
+                items={teachers}
+              />
+
+              <DropBlock
+                z={3000}
+                label="Select Grade"
+                open={openGrade}
+                setOpen={(v) => {
+                  closeAllDropdowns();
+                  setOpenGrade(v);
+                }}
+                value={gradeId}
+                setValue={(setter) => {
+                  const next = setter(gradeId);
+                  setGradeId(next);
+                }}
+                items={grades}
+              />
+
+              <DropBlock
+                z={2000}
+                label="Select Class Period"
+                open={openClassHour}
+                setOpen={(v) => {
+                  closeAllDropdowns();
+                  setOpenClassHour(v);
+                }}
+                value={classHourId}
+                setValue={(setter) => {
+                  const next = setter(classHourId);
+                  setClassHourId(next);
+                }}
+                items={classHours}
+              />
+
+              {/* SAVE BUTTON */}
+              <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
+                <Text style={styles.saveText}>Save Changes</Text>
               </TouchableOpacity>
-            </LinearGradient>
-
-            {/* SCHOOL INFO */}
-            <Text style={styles.schoolHeader}>School Information</Text>
-
-            {[
-              {
-                label: "Select School",
-                open: openSchool,
-                setOpen: setOpenSchool,
-                onOpen: () => {
-                  closeAllDropdowns();
-                  setOpenSchool(true);
-                },
-                value: schoolId || null,
-                setValue: (v: any) => setSchoolId(v ?? ""),
-                items: schools.map((s) => ({ label: s.name, value: s.id })),
-              },
-              {
-                label: "Select Teacher",
-                open: openTeacher,
-                setOpen: setOpenTeacher,
-                onOpen: () => {
-                  closeAllDropdowns();
-                  setOpenTeacher(true);
-                },
-                value: teacherId || null,
-                setValue: (v: any) => setTeacherId(v ?? ""),
-                items: teachers.map((t) => ({ label: t.name, value: t.id })),
-              },
-              {
-                label: "Select Grade",
-                open: openGrade,
-                setOpen: setOpenGrade,
-                onOpen: () => {
-                  closeAllDropdowns();
-                  setOpenGrade(true);
-                },
-                value: gradeId,
-                setValue: (v: any) => setGradeId(v ?? null),
-                items: grades.map((g) => ({ label: g.label, value: String(g.id) })),
-              },
-              {
-                label: "Select Class Period",
-                open: openClassHour,
-                setOpen: setOpenClassHour,
-                onOpen: () => {
-                  closeAllDropdowns();
-                  setOpenClassHour(true);
-                },
-                value: classHourId,
-                setValue: (v: any) => setClassHourId(v ?? null),
-                items: classHours.map((h) => ({
-                  label: h.label,
-                  value: String(h.id),
-                })),
-              },
-            ].map((d, i) => (
-              <LinearGradient
-                key={i}
-                colors={["#4a3b25", "#3b2f1f", "#4a3b25"]}
-                style={styles.brassPlate}
-              >
-                <Text style={styles.brassLabel}>{d.label}</Text>
-
-                <DropDownPicker
-                  open={d.open}
-                  value={d.value}
-                  items={d.items}
-                  setOpen={d.setOpen}
-                  setValue={d.setValue}
-                  listMode="MODAL"
-                  placeholder={d.label}
-                  onOpen={d.onOpen}
-                  style={styles.dropdown}
-                  dropDownContainerStyle={styles.dropdownContainer}
-                  modalContentContainerStyle={styles.modalDropdownContent}
-                  labelStyle={styles.dropdownLabel}
-                  selectedItemLabelStyle={styles.dropdownSelectedLabel}
-                  textStyle={styles.dropdownText}
-                  placeholderStyle={styles.dropdownPlaceholder}
-                  modalProps={{ animationType: "slide" }}
-                  renderCustomizedButtonChild={(selectedItem) => (
-                    <View style={styles.dropdownButtonInner}>
-                      <Text
-                        style={
-                          selectedItem
-                            ? styles.dropdownButtonTextSelected
-                            : styles.dropdownButtonTextPlaceholder
-                        }
-                      >
-                        {selectedItem ? selectedItem.label : d.label}
-                      </Text>
-                    </View>
-                  )}
-                />
-              </LinearGradient>
-            ))}
-
-            <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
-              <Text style={styles.saveText}>Save Changes</Text>
-            </TouchableOpacity>
-          </View>
+            </View>
+          </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
     </ParchmentScreen>
   );
 }
 
-/*********** STYLES ***********/
+/* ============================
+     REUSABLE DROPDOWN BLOCK
+============================ */
+function DropBlock({ z, label, open, setOpen, value, setValue, items }) {
+  return (
+    <View style={{ width: "90%", zIndex: z }}>
+      <LinearGradient
+        colors={["#4a3b25", "#3b2f1f", "#4a3b25"]}
+        style={styles.brassPlate}
+      >
+        <Text style={styles.brassLabel}>{label}</Text>
+
+        <DropDownPicker
+          open={open}
+          value={value}
+          items={items}
+          setOpen={setOpen}
+          setValue={setValue}
+          setItems={() => {}}
+          listMode="MODAL"
+          placeholder={label}
+          style={styles.dropdown}
+          dropDownContainerStyle={styles.dropdownContainer}
+          modalContentContainerStyle={styles.modalDropdownContent}
+          placeholderStyle={styles.dropdownPlaceholder}
+          textStyle={styles.dropdownText}
+        />
+      </LinearGradient>
+    </View>
+  );
+}
+
+/* ============================
+             STYLES
+============================ */
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: "transparent",
+  safe: { flex: 1, backgroundColor: "transparent" },
+
+  scrollContent: {
+    paddingBottom: 80,
+    paddingTop: 10,
+    alignItems: "center",
   },
 
   container: {
     width: "100%",
     alignItems: "center",
-    paddingBottom: 60,
   },
 
   header: {
@@ -480,9 +606,6 @@ const styles = StyleSheet.create({
     alignSelf: "center",
   },
 
-  /***********************
-   * AVATAR GRID — TRUE PORTRAIT FRAMES
-   ***********************/
   grid: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -502,7 +625,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#3b2f1f",
     justifyContent: "center",
     alignItems: "center",
-    overflow: "hidden",
   },
 
   selectedAvatar: {
@@ -513,10 +635,7 @@ const styles = StyleSheet.create({
   avatarImage: {
     width: "100%",
     height: "100%",
-    resizeMode: "contain",
   },
-
-  /**********************/
 
   modalOverlay: {
     flex: 1,
@@ -542,7 +661,6 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     borderColor: "#d4b16a",
     marginBottom: 18,
-    resizeMode: "contain",
   },
 
   confirmButton: {
@@ -564,7 +682,7 @@ const styles = StyleSheet.create({
   },
 
   brassPlate: {
-    width: "90%",
+    width: "100%",
     padding: 10,
     borderWidth: 2,
     borderColor: "#d4b16a",
@@ -590,32 +708,15 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#cfae64",
     backgroundColor: "#3b2f1f",
-    minHeight: 44,
   },
 
   dropdownContainer: {
     backgroundColor: "#2e2618",
     borderColor: "#d4b16a",
-    borderWidth: 1,
   },
 
   modalDropdownContent: {
     backgroundColor: "#2e2618",
-  },
-
-  dropdownLabel: {
-    color: "#f8f5e7",
-    fontFamily: "Lora-Regular",
-  },
-
-  dropdownSelectedLabel: {
-    color: "#ffd76a",
-    fontFamily: "Lora-Bold",
-  },
-
-  dropdownText: {
-    color: "#d4b16a",
-    fontFamily: "Lora-Regular",
   },
 
   dropdownPlaceholder: {
@@ -623,33 +724,16 @@ const styles = StyleSheet.create({
     fontFamily: "Lora-Regular",
   },
 
-  dropdownButtonInner: {
-    backgroundColor: "#3b2f1f",
-    borderWidth: 1,
-    borderColor: "#cfae64",
-    borderRadius: 8,
-    minHeight: 44,
-    justifyContent: "center",
-    paddingHorizontal: 8,
-  },
-
-  dropdownButtonTextSelected: {
-    color: "#ffd76a",
+  dropdownText: {
+    color: "#d4b16a",
     fontFamily: "Lora-Regular",
-    fontSize: 16,
-  },
-
-  dropdownButtonTextPlaceholder: {
-    color: "#cfae64",
-    fontFamily: "Lora-Regular",
-    fontSize: 16,
   },
 
   saveButton: {
     backgroundColor: "#d4b16a",
     paddingVertical: 12,
     borderRadius: 12,
-    marginTop: 20,
+    marginTop: 30,
     width: "90%",
     alignItems: "center",
   },
@@ -660,4 +744,3 @@ const styles = StyleSheet.create({
     color: "#2e2618",
   },
 });
-

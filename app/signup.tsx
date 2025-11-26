@@ -1,11 +1,16 @@
+import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
-  View, Text, StyleSheet, TextInput,
-  TouchableOpacity, Alert, ActivityIndicator, KeyboardAvoidingView, Platform
+    ActivityIndicator,
+    Alert,
+    KeyboardAvoidingView, Platform,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { supabase } from "../lib/supabase";
-import { useRouter } from "expo-router";
+import { supabase } from "../supabase/client";
 
 export default function SignUpScreen() {
   const router = useRouter();

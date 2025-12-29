@@ -11,7 +11,9 @@ jobs:
     steps:
       - name: Call Supabase Edge Function (refresh-public-stats)
         run: |
-          curl -sS -X POST \
+          echo "Calling function at:"
+          echo "${{ secrets.SUPABASE_FUNCTION_URL }}/refresh-public-stats" | sed 'l'
+          curl -v -X POST \
             "${{ secrets.SUPABASE_FUNCTION_URL }}/refresh-public-stats" \
             -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
             -H "Content-Type: application/json"

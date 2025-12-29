@@ -1,0 +1,17 @@
+name: Refresh Public Stats
+
+on:
+  schedule:
+    - cron: "0 * * * *" # hourly (UTC)
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call Supabase Edge Function (refresh-public-stats)
+        run: |
+          curl -sS -X POST \
+            "${{ secrets.SUPABASE_FUNCTION_URL }}/refresh-public-stats" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
+            -H "Content-Type: application/json"

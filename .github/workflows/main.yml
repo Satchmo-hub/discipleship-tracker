@@ -20,6 +20,7 @@ jobs:
           RESPONSE_FILE=$(mktemp)
           STATUS_CODE=$(curl -sS -X POST "$FUNCTION_URL" \
             -H "Authorization: Bearer $SERVICE_KEY" \
+            -H "apikey: $SERVICE_KEY" \
             -H "Content-Type: application/json" \
             -w "%{http_code}" \
             -o "$RESPONSE_FILE")
@@ -35,3 +36,4 @@ jobs:
           fi
 
           echo "✅ refresh-public-stats succeeded"
+
